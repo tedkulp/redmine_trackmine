@@ -8,14 +8,22 @@ module IssuePatch
     klass.class_eval do
       unloadable # Send unloadable so it will not be unloaded in development  
 
+      attr_accessor :do_not_update
+
       # When Issue status changed to 'closed' or 'rejected' finishes story 
       before_update do |issue|
-        if issue.status_id_changed?
-          if issue.status.is_closed?  && issue.pivotal_story_id != 0
+        if issue.do_not_update != true
+          if issue.status_id_changed? and issue.status.is_closed? and issue.pivotal_story_id != 0
             begin
               Trackmine.finish_story( issue.pivotal_story_id )
             rescue => e
               TrackmineMailer.deliver_error_mail("Error while closing story: " + e)
+            end
+          else
+            begin
+              Trackmine.update_or_create_story_from_issue( issue )
+            rescue => e
+              TrackmineMailer.deliver_error_mail("Error while creating/updating story: " + e)
             end
           end  
         end

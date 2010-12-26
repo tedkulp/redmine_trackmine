@@ -122,7 +122,9 @@ module Trackmine
       issues.each do |issue|
         # Before update checks if mapping still exist (no matter of labels- only projects mapping)
         unless issue.project.mappings.all( :conditions => ["tracker_project_id=?", tracker_project_id] ).empty?
+          issue.do_not_update = true
           issue.update_attributes(params)
+          issue.do_not_update = false
         end
       end
     end
@@ -151,6 +153,57 @@ module Trackmine
         end
       rescue => e 
         raise PivotalTrackerError.new("Can't finish the story id:#{story_id}. " + e )     
+      end
+    end
+
+    def update_or_create_story_from_issue(issue)
+      begin
+        set_super_token
+        if issue.pivotal_story_id != 0
+          #We're going to update
+          story_id = issue.pivotal_story_id
+          project_id = StoryProject.find_by_story_id(story_id).try(:tracker_project_id)
+          story = PivotalTracker::Story.find(story_id, project_id) 
+          if story
+            story_hash = {
+              :project_id => project_id,
+              :name => issue.subject,
+              :description => issue.description,
+            }
+            if story.update(story_hash)
+              StoryProject.find_or_create_by_story_id_and_tracker_project_id(story.id, story.project_id)
+            end
+          end
+        else
+          #We're going to create a new story
+          issue.project.mappings.each do |mapping|
+            #Only do this if we're in the accepted stage
+            if issue.status.name == 'Accepted'
+              project_id = mapping.tracker_project_id
+              project = PivotalTracker::Project.find(project_id)
+              if project
+                story_type = mapping.story_types.invert[issue.tracker.name] ||= 'feature'
+                story_hash = {
+                  :project_id => project_id,
+                  :name => issue.subject,
+                  :description => issue.description,
+                  :requested_by => issue.author.name,
+                  :story_type => story_type
+                }
+                story = project.stories.create(story_hash)
+                unless story.blank?
+                  StoryProject.find_or_create_by_story_id_and_tracker_project_id(story.id, story.project_id)
+                  issue.pivotal_story_id = story.id
+                  issue.do_not_update = true
+                  issue.save
+                  issue.do_not_update = false
+                end
+              end
+            end
+          end
+        end
+      rescue => e 
+        raise PivotalTrackerError.new("Can't create/update the story for issue id:#{issue.id}. " + e )     
       end
     end
 
