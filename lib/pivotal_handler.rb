@@ -3,10 +3,11 @@ require 'sinatra'
 class PivotalHandler < Sinatra::Base
 
   post '/pivotal_activity.xml' do
+    request.body.rewind
     message = request.body.read.strip
     message_hash = Hash.from_xml(message)
     return [202, "It is not a correct Pivotal Tracker message"] if message_hash['activity'].nil? 
-    if message_hash['activity']['event_type'] == 'story_update'
+    if ['story_create', 'story_update'].include?(message_hash['activity']['event_type'])
       begin
         Trackmine.read_activity message_hash['activity'] 
       rescue => e
