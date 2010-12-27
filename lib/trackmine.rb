@@ -163,13 +163,24 @@ module Trackmine
           #We're going to update
           story_id = issue.pivotal_story_id
           project_id = StoryProject.find_by_story_id(story_id).try(:tracker_project_id)
+          project = PivotalTracker::Project.find(project_id)
           story = PivotalTracker::Story.find(story_id, project_id) 
           if story
             story_hash = {
               :project_id => project_id,
               :name => issue.subject,
-              :description => issue.description,
+              :description => issue.description
             }
+            if !issue.author.blank? and does_user_exist_in_pivotal_project?(project, issue.author.mail)
+              story_hash[:requested_by] = issue.author.name
+            else
+              story_hash[:requested_by] = get_project_owner(project)
+            end
+            if !issue.assigned_to.blank? and does_user_exist_in_pivotal_project?(project, issue.assigned_to.mail)
+              story_hash[:owned_by] = issue.assigned_to.name
+            else
+              story_hash[:owned_by] = ''
+            end
             if story.update(story_hash)
               StoryProject.find_or_create_by_story_id_and_tracker_project_id(story.id, story.project_id)
             end
@@ -187,9 +198,16 @@ module Trackmine
                   :project_id => project_id,
                   :name => issue.subject,
                   :description => issue.description,
-                  :requested_by => issue.author.name,
                   :story_type => story_type
                 }
+                if !issue.author.blank? and does_user_exist_in_pivotal_project?(project, issue.author.mail)
+                  story_hash[:requested_by] = issue.author.name
+                else
+                  story_hash[:requested_by] = get_project_owner(project)
+                end
+                if !issue.assigned_to.blank? and does_user_exist_in_pivotal_project?(project, issue.assigned_to.mail)
+                  story_hash[:owned_by] = issue.assigned_to.name
+                end
                 story = project.stories.create(story_hash)
                 unless story.blank?
                   StoryProject.find_or_create_by_story_id_and_tracker_project_id(story.id, story.project_id)
@@ -205,6 +223,25 @@ module Trackmine
       rescue => e 
         raise PivotalTrackerError.new("Can't create/update the story for issue id:#{issue.id}. " + e )     
       end
+    end
+
+    def does_user_exist_in_pivotal_project?(project, user_email)
+      project.memberships.all.each do |member|
+        if member.email == user_email
+          return true
+        end
+      end
+      return false
+    end
+
+    def get_project_owner(project)
+      owner = ''
+      project.memberships.all.each do |member|
+        if member.role == 'Owner'
+          owner = member.email
+        end
+      end
+      return owner
     end
 
     private 
